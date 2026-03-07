@@ -2,4 +2,4 @@ tuya_session_*
 .tuya_*
 .tuya-*
 .tmp
-tuya-ipc-terminal
+/tuya-ipc-terminal

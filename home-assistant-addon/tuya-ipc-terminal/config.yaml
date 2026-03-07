@@ -1,0 +1,30 @@
+name: Tuya IPC Terminal
+version: "0.0.6"
+slug: tuya_ipc_terminal
+description: Expose Tuya Smart cameras as RTSP streams for Home Assistant
+url: "https://github.com/cchrkk/tuya-ipc-terminal"
+startup: services
+boot: auto
+ingress: false
+init: false
+host_network: true
+arch:
+  - amd64
+  - aarch64
+  - armv7
+options:
+  setup_mode: false
+  auth_method: qr
+  region: ""
+  email: ""
+  password: ""
+  country_code: ""
+  rtsp_port: 8833
+schema:
+  setup_mode: bool
+  auth_method: list(qr|password)
+  region: str?
+  email: str?
+  password: str?
+  country_code: str?
+  rtsp_port: port

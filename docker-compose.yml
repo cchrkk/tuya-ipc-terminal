@@ -1,0 +1,13 @@
+services:
+  tuya-ipc-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tuya-ipc-terminal
+    restart: unless-stopped
+    environment:
+      TUYA_DATA_DIR: /data/.tuya-data
+    volumes:
+      - ./data:/data
+    network_mode: host
+    command: ["rtsp", "start", "--port", "8554"]

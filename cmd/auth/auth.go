@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"tuya-ipc-terminal/cmd/cameras"
+
 	"github.com/mdp/qrterminal"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/publicsuffix"
@@ -40,8 +42,118 @@ func NewAuthCmd() *cobra.Command {
 	cmd.AddCommand(newTestCmd())
 	cmd.AddCommand(newShowRegionsCmd())
 	cmd.AddCommand(newShowCountryCodesCmd())
+	cmd.AddCommand(newSetupCmd())
 
 	return cmd
+}
+
+func newSetupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "setup [region] [email]",
+		Short: "Setup user auth and refresh cameras",
+		Long: `Run a guided setup flow for containers/automation.
+
+By default this command:
+1. Authenticates a user (QR or password)
+2. Saves the session
+3. Refreshes camera discovery
+
+Examples:
+  tuya-ipc-terminal auth setup eu-central user@example.com
+  tuya-ipc-terminal auth setup eu-central user@example.com --password-auth
+  tuya-ipc-terminal auth setup eu-central user@example.com --password-auth --password-value 'secret' --force`,
+		Args: cobra.ExactArgs(2),
+		RunE: runSetupAuth,
+	}
+
+	cmd.Flags().Bool("password-auth", false, "Use email/password authentication instead of QR")
+	cmd.Flags().String("password-value", "", "Password value for non-interactive setup (use with --password-auth)")
+	cmd.Flags().String("country-code", "", "Phone country code for password login (default: region continent code)")
+	cmd.Flags().Bool("skip-camera-refresh", false, "Skip camera discovery refresh after authentication")
+	cmd.Flags().Bool("force", false, "Re-authenticate without confirmation if user already exists")
+
+	return cmd
+}
+
+func runSetupAuth(cmd *cobra.Command, args []string) error {
+	regionName := args[0]
+	email := args[1]
+
+	usePassword, _ := cmd.Flags().GetBool("password-auth")
+	passwordValue, _ := cmd.Flags().GetString("password-value")
+	countryCode, _ := cmd.Flags().GetString("country-code")
+	skipRefresh, _ := cmd.Flags().GetBool("skip-camera-refresh")
+	force, _ := cmd.Flags().GetBool("force")
+
+	var selectedRegion *tuya.Region
+	for _, region := range AvailableRegions {
+		if region.Name == regionName {
+			selectedRegion = &region
+			break
+		}
+	}
+
+	if selectedRegion == nil {
+		return fmt.Errorf("invalid region: %s", regionName)
+	}
+
+	if !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+		return fmt.Errorf("invalid email format: %s", email)
+	}
+
+	existingUser, err := storageManager.GetUser(selectedRegion.Name, email)
+	if err != nil {
+		return fmt.Errorf("failed to check existing user: %v", err)
+	}
+
+	shouldAuth := true
+
+	if existingUser != nil && !force {
+		fmt.Printf("User %s in region %s already exists. Re-authenticate? (y/N):\n", email, selectedRegion.Name)
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			fmt.Println("Skipping authentication step")
+			shouldAuth = false
+		}
+	}
+
+	if shouldAuth {
+		fmt.Printf("Running setup auth for %s (%s)...\n", email, selectedRegion.Name)
+
+		var sessionData *tuya.SessionData
+		if usePassword {
+			sessionData, err = performPasswordAuthenticationWithPassword(*selectedRegion, email, passwordValue, countryCode)
+		} else {
+			sessionData, err = performQRAuthentication(*selectedRegion, email)
+		}
+
+		if err != nil {
+			return fmt.Errorf("authentication failed: %v", err)
+		}
+
+		if err := storageManager.SaveUser(selectedRegion.Name, email, sessionData); err != nil {
+			return fmt.Errorf("failed to save user session: %v", err)
+		}
+
+		fmt.Printf("✓ Authentication completed for %s (%s)\n", sessionData.LoginResult.Nickname, email)
+	}
+
+	if skipRefresh {
+		fmt.Println("Skipping camera refresh step")
+		return nil
+	}
+
+	fmt.Println("Refreshing cameras for all authenticated users...")
+	totalCameras, successfulUsers, err := cameras.RefreshAllCameras(storageManager)
+	if err != nil {
+		return err
+	}
+
+	users, _ := storageManager.ListUsers()
+	fmt.Printf("✓ Discovery complete: %d camera(s), %d/%d user(s) processed\n", totalCameras, successfulUsers, len(users))
+
+	return nil
 }
 
 func newListCmd() *cobra.Command {
@@ -498,18 +610,30 @@ func promptPassword() (string, error) {
 }
 
 func performPasswordAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
-	serverHost := region.Host
-
 	password, err := promptPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get password: %v", err)
+	}
+
+	return performPasswordAuthenticationWithPassword(region, email, password, region.Continent)
+}
+
+func performPasswordAuthenticationWithPassword(region tuya.Region, email, password, countryCode string) (*tuya.SessionData, error) {
+	serverHost := region.Host
+
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("password is required for password authentication")
+	}
+
+	if strings.TrimSpace(countryCode) == "" {
+		countryCode = region.Continent
 	}
 
 	httpClient := createHTTPClientWithSession(nil)
 
 	fmt.Println("\nAuthenticating with email/password...")
 
-	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, region.Continent)
+	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, countryCode)
 	if err != nil {
 		return nil, fmt.Errorf("password authentication failed: %v", err)
 	}

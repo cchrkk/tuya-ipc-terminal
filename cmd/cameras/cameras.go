@@ -117,15 +117,28 @@ func runListCameras(cmd *cobra.Command, args []string) error {
 func runRefreshCameras(cmd *cobra.Command, args []string) error {
 	fmt.Println("Refreshing camera discovery...")
 
-	users, err := storageManager.ListUsers()
+	totalCameras, successfulUsers, err := RefreshAllCameras(storageManager)
 	if err != nil {
-		return fmt.Errorf("failed to list users: %v", err)
+		return err
 	}
 
+	users, _ := storageManager.ListUsers()
+	fmt.Printf("✓ Discovery complete!\n")
+	fmt.Printf("Successfully processed %d/%d users\n", successfulUsers, len(users))
+	fmt.Printf("Total cameras discovered: %d\n", totalCameras)
+
+	return nil
+}
+
+func RefreshAllCameras(sm *storage.StorageManager) (int, int, error) {
+	users, err := sm.ListUsers()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to list users: %v", err)
+	}
 	if len(users) == 0 {
 		fmt.Println("No authenticated users found.")
 		fmt.Println("Use 'tuya-ipc-terminal auth add' to add users first.")
-		return nil
+		return 0, 0, nil
 	}
 
 	totalCameras := 0
@@ -134,13 +147,13 @@ func runRefreshCameras(cmd *cobra.Command, args []string) error {
 	for _, user := range users {
 		fmt.Printf("Discovering cameras for %s (%s)...\n", user.Email, user.Region)
 
-		cameras, err := discoverCamerasForUser(&user)
+		cameras, err := discoverCamerasForUser(sm, &user)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to discover cameras: %v\n", err)
 			continue
 		}
 
-		if err := storageManager.UpdateCamerasForUser(user.UserKey, cameras); err != nil {
+		if err := sm.UpdateCamerasForUser(user.UserKey, cameras); err != nil {
 			fmt.Printf("  ✗ Failed to save cameras: %v\n", err)
 			continue
 		}
@@ -150,11 +163,7 @@ func runRefreshCameras(cmd *cobra.Command, args []string) error {
 		successfulUsers++
 	}
 
-	fmt.Printf("✓ Discovery complete!\n")
-	fmt.Printf("Successfully processed %d/%d users\n", successfulUsers, len(users))
-	fmt.Printf("Total cameras discovered: %d\n", totalCameras)
-
-	return nil
+	return totalCameras, successfulUsers, nil
 }
 
 func runCameraInfo(cmd *cobra.Command, args []string) error {
@@ -218,7 +227,7 @@ func runCameraInfo(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, error) {
+func discoverCamerasForUser(sm *storage.StorageManager, user *storage.UserSession) ([]storage.CameraInfo, error) {
 	if user.SessionData == nil {
 		return nil, errors.New("user has no valid session data")
 	}
@@ -285,7 +294,7 @@ func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, er
 			continue // Skip if we can't get WebRTC config
 		}
 
-		rtspPath := storageManager.GenerateRTSPPath(device.DeviceName, device.DeviceId)
+		rtspPath := sm.GenerateRTSPPath(device.DeviceName, device.DeviceId)
 
 		camera := storage.CameraInfo{
 			UserKey:    user.UserKey,

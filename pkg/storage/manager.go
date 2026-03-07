@@ -39,12 +39,16 @@ type StorageManager struct {
 }
 
 func NewStorageManager() (*StorageManager, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
+	dataDir := os.Getenv("TUYA_DATA_DIR")
+	if dataDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+
+		dataDir = filepath.Join(cwd, ".tuya-data")
 	}
 
-	dataDir := filepath.Join(cwd, ".tuya-data")
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, err
 	}

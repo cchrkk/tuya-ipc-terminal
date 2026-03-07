@@ -1,0 +1,7 @@
+.git
+.gitignore
+.vscode
+.tuya-data
+home-assistant-addon/**/.DS_Store
+**/*_test.go
+README.md

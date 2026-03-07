@@ -46,6 +46,52 @@ chmod +x build.sh
 ffplay rtsp://localhost:8554/MyCamera
 ```
 
+### 🐳 Docker Quick Start
+
+Build image:
+
+```bash
+docker build -t tuya-ipc-terminal:local .
+```
+
+First-time authentication and camera discovery (interactive):
+
+```bash
+# Add user (QR flow)
+docker run --rm -it \
+  -v $(pwd)/data:/data \
+  -e TUYA_DATA_DIR=/data/.tuya-data \
+  tuya-ipc-terminal:local auth add eu-central user@example.com
+
+# Refresh camera list
+docker run --rm -it \
+  -v $(pwd)/data:/data \
+  -e TUYA_DATA_DIR=/data/.tuya-data \
+  tuya-ipc-terminal:local cameras refresh
+
+# One-step setup (auth + cameras refresh)
+docker run --rm -it \
+  -v $(pwd)/data:/data \
+  -e TUYA_DATA_DIR=/data/.tuya-data \
+  tuya-ipc-terminal:local auth setup eu-central user@example.com --password-auth --password-value 'secret' --force
+```
+
+Run RTSP server:
+
+```bash
+docker run --rm -it \
+  --network host \
+  -v $(pwd)/data:/data \
+  -e TUYA_DATA_DIR=/data/.tuya-data \
+  tuya-ipc-terminal:local rtsp start --port 8554
+```
+
+Or use compose:
+
+```bash
+docker compose up --build
+```
+
 ## 📖 Complete Documentation
 
 ### 🔐 Authentication Management
@@ -78,6 +124,10 @@ ffplay rtsp://localhost:8554/MyCamera
 
 # Test session validity
 ./tuya-ipc-terminal auth test eu-central user@example.com
+
+# Setup flow (auth + cameras refresh)
+./tuya-ipc-terminal auth setup eu-central user@example.com
+./tuya-ipc-terminal auth setup eu-central user@example.com --password-auth --password-value 'secret' --force
 ```
 
 #### 🌍 Regional Information
@@ -170,6 +220,29 @@ streams:
     - rtsp://localhost:8554/FrontDoor
 ```
 
+### 🧩 Home Assistant Add-on (Custom Repository)
+
+This repository now includes a custom add-on scaffold in:
+
+`home-assistant-addon/`
+
+Add repository in Home Assistant:
+
+1. Go to `Settings -> Add-ons -> Add-on Store -> Repositories`
+2. Add repository URL: `https://github.com/seydx/tuya-ipc-terminal`
+3. Install `Tuya IPC Terminal`
+
+Add-on behavior:
+
+- Runs `tuya-ipc-terminal rtsp start --port <rtsp_port>`
+- Uses persistent storage at `/data/.tuya-data`
+- Uses host network (RTSP reachable on Home Assistant host IP)
+
+Important:
+
+- Initial authentication/discovery is still CLI-based.
+- Use Docker CLI bootstrap commands above, with the same data path semantics.
+
 
 ## 🏗️ Advanced Usage
 
@@ -237,6 +310,12 @@ sudo systemctl start tuya-rtsp
 ├── user_eu-central_user_at_example_com.json    # User sessions
 ├── user_us-west_business_at_company_com.json   # Multiple accounts
 └── cameras.json                                # Camera registry
+```
+
+You can override the storage path with environment variable:
+
+```bash
+TUYA_DATA_DIR=/custom/path/.tuya-data
 ```
 
 ## 🛠️ Technical Details

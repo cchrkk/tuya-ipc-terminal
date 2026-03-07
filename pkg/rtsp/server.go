@@ -369,7 +369,6 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 
 	// Create new stream
 	stream := NewCameraStream(camera, streamResolution, user, s.storageManager, s)
-	stream.connecting = true
 
 	stream.webrtcBridge.OnError = func(err error) {
 		if stream.active || stream.connecting {
@@ -518,8 +517,9 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 	cs.clients[client.session] = client
 	cs.lastActivity = time.Now()
 
-	// Start stream if not active
-	if !cs.active {
+	// Start stream only once while it is not active and not already connecting.
+	if !cs.active && !cs.connecting {
+		cs.connecting = true
 		go cs.startStream()
 	}
 }
@@ -567,22 +567,24 @@ func (cs *CameraStream) Stop() {
 
 func (cs *CameraStream) startStream() {
 	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
-
-	if cs.active {
+	if cs.active || !cs.connecting {
+		cs.mutex.Unlock()
 		return
 	}
+	cs.mutex.Unlock()
 
 	core.Logger.Info().Msgf("Starting stream for camera: %s", cs.camera.DeviceName)
 
 	if err := cs.webrtcBridge.Start(); err != nil {
 		core.Logger.Error().Err(err).Msg("Failed to start WebRTC bridge")
-		cs.stopStreamInternal()
+		cs.stopStream()
 		return
 	}
 
+	cs.mutex.Lock()
 	cs.connecting = false
 	cs.active = true
+	cs.mutex.Unlock()
 }
 
 func (cs *CameraStream) stopStream() {

@@ -310,6 +310,22 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 	isVideoTrack := strings.Contains(request.URL, "/video")
 	isAudioTrack := strings.Contains(request.URL, "/audio")
 
+	// Some clients (notably VLC/Live555 in certain reconnect flows) send SETUP
+	// against the aggregate control URL (e.g. /PTZ1/hd) instead of media tracks.
+	// In that case map SETUPs by order: video -> audio -> backchannel.
+	if !isVideoTrack && !isAudioTrack && !isBackchannel {
+		switch client.setupCount {
+		case 0:
+			isVideoTrack = true
+		case 1:
+			isAudioTrack = true
+		default:
+			isBackchannel = true
+		}
+
+		core.Logger.Debug().Msgf("SETUP on aggregate URL mapped to track (video=%v audio=%v backchannel=%v)", isVideoTrack, isAudioTrack, isBackchannel)
+	}
+
 	core.Logger.Trace().Msgf("Setup track - Video: %v, Audio: %v, Backchannel: %v", isVideoTrack, isAudioTrack, isBackchannel)
 
 	var responseTransport string

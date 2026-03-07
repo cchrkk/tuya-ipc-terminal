@@ -229,7 +229,7 @@ This repository now includes a custom add-on scaffold in:
 Add repository in Home Assistant:
 
 1. Go to `Settings -> Add-ons -> Add-on Store -> Repositories`
-2. Add repository URL: `https://github.com/seydx/tuya-ipc-terminal`
+2. Add repository URL: `https://github.com/cchrkk/tuya-ipc-terminal`
 3. Install `Tuya IPC Terminal`
 
 Add-on behavior:

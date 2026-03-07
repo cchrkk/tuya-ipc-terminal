@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,6 +233,15 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 	// Extract camera path from URL
 	cameraPath, streamResolution := extractCameraPath(request.URL)
 	if cameraPath == "" {
+		if request.Method == "OPTIONS" {
+			headers := map[string]string{
+				"CSeq":   fmt.Sprintf("%d", request.CSeq),
+				"Public": "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN",
+			}
+			sendRTSPResponse(conn, 200, "OK", headers, "")
+			return
+		}
+
 		core.Logger.Error().Msg("Invalid RTSP URL")
 		sendRTSPResponse(conn, 400, "Bad Request", nil, "")
 		return
@@ -290,6 +300,11 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 }
 
 func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.UserSession, error) {
+	normalizedPath := normalizeRTSPPath(path)
+	if normalizedPath == "" {
+		return nil, nil, nil
+	}
+
 	cameras, err := s.storageManager.GetAllCameras()
 	if err != nil {
 		return nil, nil, err
@@ -297,7 +312,7 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 
 	// Find camera by RTSP path
 	for _, camera := range cameras {
-		if camera.RTSPPath == path {
+		if normalizeRTSPPath(camera.RTSPPath) == normalizedPath {
 			// Get user for this camera
 			users, err := s.storageManager.ListUsers()
 			if err != nil {
@@ -313,6 +328,23 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 	}
 
 	return nil, nil, nil
+}
+
+func normalizeRTSPPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	if len(path) > 1 {
+		path = strings.TrimSuffix(path, "/")
+	}
+
+	return strings.ToLower(path)
 }
 
 func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession) (*CameraStream, error) {

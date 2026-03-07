@@ -95,14 +95,15 @@ func extractCameraPath(rtspURL string) (string, string) {
 	}
 
 	streamResolution := "hd" // Default to HD
+	lowerPath := strings.ToLower(path)
 
 	// check if ends with "/hd" or "/sd"
-	if strings.HasSuffix(path, "/hd") {
+	if strings.HasSuffix(lowerPath, "/hd") {
 		streamResolution = "hd"
-		path = strings.TrimSuffix(path, "/hd")
-	} else if strings.HasSuffix(path, "/sd") {
+		path = path[:len(path)-3]
+	} else if strings.HasSuffix(lowerPath, "/sd") {
 		streamResolution = "sd"
-		path = strings.TrimSuffix(path, "/sd")
+		path = path[:len(path)-3]
 	}
 
 	return path, streamResolution

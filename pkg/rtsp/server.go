@@ -322,9 +322,15 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 	// Check if stream already exists
 	streamId := fmt.Sprintf("%s-%s", camera.DeviceID, streamResolution)
 	if stream, exists := s.streams[streamId]; exists {
-		if stream.active || stream.connecting {
-			core.Logger.Trace().Msgf("Reusing existing stream for camera: %s", camera.DeviceName)
+		stream.mutex.Lock()
+		isReusable := stream.active || stream.connecting
+		if isReusable {
 			stream.lastActivity = time.Now()
+		}
+		stream.mutex.Unlock()
+
+		if isReusable {
+			core.Logger.Trace().Msgf("Reusing existing stream for camera: %s", camera.DeviceName)
 			return stream, nil
 		}
 	}
@@ -434,8 +440,13 @@ func (s *RTSPServer) cleanupInactiveStreams() {
 
 	now := time.Now()
 	for deviceID, stream := range s.streams {
+		stream.mutex.Lock()
+		lastActivity := stream.lastActivity
+		clientCount := len(stream.clients)
+		stream.mutex.Unlock()
+
 		// Remove streams inactive for more than 5 minutes
-		if now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0 {
+		if now.Sub(lastActivity) > 5*time.Minute && clientCount == 0 {
 			core.Logger.Trace().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
 			stream.Stop()
 			delete(s.streams, deviceID)
@@ -506,8 +517,15 @@ func (cs *CameraStream) SetShutdownDelay(delay time.Duration) {
 }
 
 func (cs *CameraStream) Stop() {
-	// Clear all clients first
+	cs.mutex.Lock()
+	sessionIDs := make([]string, 0, len(cs.clients))
 	for sessionID := range cs.clients {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	cs.mutex.Unlock()
+
+	// Clear all clients first
+	for _, sessionID := range sessionIDs {
 		cs.RemoveClient(sessionID)
 	}
 

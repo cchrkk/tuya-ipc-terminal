@@ -238,30 +238,12 @@ func (rf *RTPForwarder) RemoveClient(sessionID string) {
 	rf.mutex.Lock()
 	defer rf.mutex.Unlock()
 
-	if client, exists := rf.clients[sessionID]; exists {
-		if client.transportMode == TransportUDP {
-			if client.videoConn != nil {
-				client.videoConn.Close()
-			}
-			if client.audioConn != nil {
-				client.audioConn.Close()
-			}
-			if client.backchannelListener != nil {
-				client.backchannelListener.Close()
-			}
-			if client.backchannelRTCPListener != nil {
-				client.backchannelRTCPListener.Close()
-			}
-		}
-
-		delete(rf.clients, sessionID)
-		core.Logger.Trace().Msgf("Removed RTP client %s", sessionID)
-	}
+	rf.removeClientLocked(sessionID)
 }
 
 func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
-	rf.mutex.RLock()
-	defer rf.mutex.RUnlock()
+	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
 
 	if len(rf.clients) == 0 {
 		return
@@ -275,13 +257,15 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 	}
 
 	// Forward to all clients
+	var staleClients []string
 	for sessionID, client := range rf.clients {
 		client.lastActivity = time.Now()
 
 		if client.transportMode == TransportUDP {
 			if client.videoConn != nil {
 				if _, err := client.videoConn.Write(data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to UDP client %s", sessionID)
+					core.Logger.Debug().Err(err).Msgf("Removing stale UDP video client %s", sessionID)
+					staleClients = append(staleClients, sessionID)
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first video packet to UDP client %s on port %d",
@@ -291,7 +275,8 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 		} else if client.transportMode == TransportTCP {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.videoRTPChannel, data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to TCP client %s", sessionID)
+					core.Logger.Debug().Err(err).Msgf("Removing stale TCP video client %s", sessionID)
+					staleClients = append(staleClients, sessionID)
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first video packet to TCP client %s on channel %d",
@@ -300,11 +285,15 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 			}
 		}
 	}
+
+	for _, sessionID := range staleClients {
+		rf.removeClientLocked(sessionID)
+	}
 }
 
 func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
-	rf.mutex.RLock()
-	defer rf.mutex.RUnlock()
+	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
 
 	if len(rf.clients) == 0 {
 		return
@@ -318,13 +307,15 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 	}
 
 	// Forward to all clients
+	var staleClients []string
 	for sessionID, client := range rf.clients {
 		client.lastActivity = time.Now()
 
 		if client.transportMode == TransportUDP {
 			if client.audioConn != nil {
 				if _, err := client.audioConn.Write(data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to UDP client %s", sessionID)
+					core.Logger.Debug().Err(err).Msgf("Removing stale UDP audio client %s", sessionID)
+					staleClients = append(staleClients, sessionID)
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to UDP client %s on port %d",
@@ -334,7 +325,8 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 		} else if client.transportMode == TransportTCP {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.audioRTPChannel, data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to TCP client %s", sessionID)
+					core.Logger.Debug().Err(err).Msgf("Removing stale TCP audio client %s", sessionID)
+					staleClients = append(staleClients, sessionID)
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to TCP client %s on channel %d",
@@ -343,9 +335,16 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 			}
 		}
 	}
+
+	for _, sessionID := range staleClients {
+		rf.removeClientLocked(sessionID)
+	}
 }
 
 func (rf *RTPForwarder) Stop() {
+	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
+
 	// Reset SSRCs
 	rf.videoSSRC = 0
 	rf.audioSSRC = 1
@@ -356,7 +355,7 @@ func (rf *RTPForwarder) Stop() {
 
 	// Clear all clients
 	for sessionID := range rf.clients {
-		rf.RemoveClient(sessionID)
+		rf.removeClientLocked(sessionID)
 	}
 
 	core.Logger.Trace().Msg("RTPForwarder stopped and all clients cleared")
@@ -382,25 +381,33 @@ func (rf *RTPForwarder) CleanupInactiveClients(timeout time.Duration) {
 	}
 
 	for _, sessionID := range toRemove {
-		if client, exists := rf.clients[sessionID]; exists {
-			if client.transportMode == TransportUDP {
-				if client.videoConn != nil {
-					client.videoConn.Close()
-				}
-				if client.audioConn != nil {
-					client.audioConn.Close()
-				}
-				if client.backchannelListener != nil {
-					client.backchannelListener.Close()
-				}
-				if client.backchannelRTCPListener != nil {
-					client.backchannelRTCPListener.Close()
-				}
-			}
-			delete(rf.clients, sessionID)
-			core.Logger.Trace().Msgf("Cleaned up inactive RTP client %s", sessionID)
+		rf.removeClientLocked(sessionID)
+	}
+}
+
+func (rf *RTPForwarder) removeClientLocked(sessionID string) {
+	client, exists := rf.clients[sessionID]
+	if !exists {
+		return
+	}
+
+	if client.transportMode == TransportUDP {
+		if client.videoConn != nil {
+			client.videoConn.Close()
+		}
+		if client.audioConn != nil {
+			client.audioConn.Close()
+		}
+		if client.backchannelListener != nil {
+			client.backchannelListener.Close()
+		}
+		if client.backchannelRTCPListener != nil {
+			client.backchannelRTCPListener.Close()
 		}
 	}
+
+	delete(rf.clients, sessionID)
+	core.Logger.Trace().Msgf("Removed RTP client %s", sessionID)
 }
 
 func (rf *RTPForwarder) handleUDPBackchannelRTP(sessionID string, listener *net.UDPConn) {

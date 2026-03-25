@@ -107,14 +107,29 @@ func runSetupAuth(cmd *cobra.Command, args []string) error {
 	}
 
 	shouldAuth := true
+	sessionValid := false
+
+	if existingUser != nil {
+		sessionValid, err = storageManager.ValidateUserSession(selectedRegion.Name, email)
+		if err != nil {
+			return fmt.Errorf("failed to validate existing session: %v", err)
+		}
+	}
 
 	if existingUser != nil && !force {
-		fmt.Printf("User %s in region %s already exists. Re-authenticate? (y/N):\n", email, selectedRegion.Name)
-		var response string
-		fmt.Scanln(&response)
-		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
-			fmt.Println("Skipping authentication step")
+		if sessionValid && !term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Existing valid session found for %s (%s). Skipping authentication step in non-interactive mode.\n", email, selectedRegion.Name)
 			shouldAuth = false
+		} else if sessionValid {
+			fmt.Printf("User %s in region %s already exists. Re-authenticate? (y/N):\n", email, selectedRegion.Name)
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+				fmt.Println("Skipping authentication step")
+				shouldAuth = false
+			}
+		} else {
+			fmt.Printf("Existing session for %s (%s) is missing/expired. Re-authentication required.\n", email, selectedRegion.Name)
 		}
 	}
 

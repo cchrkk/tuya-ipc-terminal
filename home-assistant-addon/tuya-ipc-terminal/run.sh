@@ -28,7 +28,7 @@ if [[ "${SETUP_MODE}" == "true" ]]; then
     exit 1
   fi
 
-  SETUP_ARGS=(auth setup "${REGION}" "${EMAIL}" --force)
+  SETUP_ARGS=(auth setup "${REGION}" "${EMAIL}")
 
   if [[ "${AUTH_METHOD}" == "password" ]]; then
     if [[ -z "${PASSWORD}" ]]; then

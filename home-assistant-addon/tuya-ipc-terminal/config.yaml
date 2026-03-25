@@ -1,5 +1,5 @@
 name: Tuya IPC Terminal
-version: "0.0.6"
+version: "0.0.7"
 slug: tuya_ipc_terminal
 description: Expose Tuya Smart cameras as RTSP streams for Home Assistant
 url: "https://github.com/cchrkk/tuya-ipc-terminal"

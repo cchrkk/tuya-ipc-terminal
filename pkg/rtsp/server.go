@@ -230,6 +230,11 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 		return
 	}
 
+	// Reuse session IDs provided by clients (e.g. reconnect / extra SETUP on same RTSP session).
+	if requestedSession := extractSessionID(request.Headers["Session"]); requestedSession != "" {
+		session = requestedSession
+	}
+
 	// Extract camera path from URL
 	cameraPath, streamResolution := extractCameraPath(request.URL)
 	if cameraPath == "" {
@@ -420,6 +425,28 @@ func (s *RTSPServer) removeClient(sessionID string) {
 		client.conn.Close()
 		delete(s.clients, sessionID)
 	}
+}
+
+func (s *RTSPServer) removeClientForConnection(sessionID string, conn net.Conn) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	client, exists := s.clients[sessionID]
+	if !exists {
+		return
+	}
+
+	// If the session has already been rebound to a different connection, do not remove it.
+	if client.conn != conn {
+		return
+	}
+
+	if client.stream != nil {
+		client.stream.RemoveClient(sessionID)
+	}
+
+	client.conn.Close()
+	delete(s.clients, sessionID)
 }
 
 func (s *RTSPServer) printAvailableEndpoints() error {

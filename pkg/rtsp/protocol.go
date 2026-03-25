@@ -97,6 +97,16 @@ func extractCameraPath(rtspURL string) (string, string) {
 	streamResolution := "hd" // Default to HD
 	lowerPath := strings.ToLower(path)
 
+	// Some clients SETUP media-control URLs (e.g. /cam/sd/video, /cam/sd/backchannel).
+	// Strip control-track suffix first so base camera path resolution detection still works.
+	for _, suffix := range []string{"/video", "/audio", "/backchannel"} {
+		if strings.HasSuffix(lowerPath, suffix) {
+			path = path[:len(path)-len(suffix)]
+			lowerPath = strings.ToLower(path)
+			break
+		}
+	}
+
 	// check if ends with "/hd" or "/sd"
 	if strings.HasSuffix(lowerPath, "/hd") {
 		streamResolution = "hd"
@@ -115,8 +125,23 @@ func generateSessionID() string {
 	return hex.EncodeToString(bytes)
 }
 
+func extractSessionID(sessionHeader string) string {
+	sessionHeader = strings.TrimSpace(sessionHeader)
+	if sessionHeader == "" {
+		return ""
+	}
+
+	parts := strings.Split(sessionHeader, ";")
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(parts[0])
+}
+
 func (s *RTSPServer) handleRTSPProtocol(client *RTSPClient) {
-	defer s.removeClient(client.session)
+	conn := client.conn
+	defer s.removeClientForConnection(client.session, conn)
 
 	for {
 		if err := client.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {

@@ -406,6 +406,19 @@ func (s *RTSPServer) removeStream(streamId string) {
 	}
 }
 
+func (s *RTSPServer) removeStreamIfMatch(streamId string, expected *CameraStream) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	current, exists := s.streams[streamId]
+	if !exists || current != expected {
+		return
+	}
+
+	delete(s.streams, streamId)
+	core.Logger.Trace().Msgf("Removed stream %s from server map", streamId)
+}
+
 func (s *RTSPServer) addClient(client *RTSPClient) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -649,7 +662,7 @@ func (cs *CameraStream) stopStreamInternal() {
 	// Remove from server map in a separate goroutine to avoid potential deadlock
 	go func() {
 		if cs.server != nil {
-			cs.server.removeStream(cs.streamId)
+			cs.server.removeStreamIfMatch(cs.streamId, cs)
 		}
 	}()
 }

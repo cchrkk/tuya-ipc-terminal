@@ -89,6 +89,12 @@ func (wb *WebRTCBridge) Start() error {
 		return errors.New("bridge already connected")
 	}
 
+	// Reset runtime state for reconnect attempts on a reused bridge instance.
+	wb.waiter = utils.Waiter{}
+	if wb.ctx == nil || wb.ctx.Err() != nil {
+		wb.ctx, wb.cancel = context.WithCancel(context.Background())
+	}
+
 	core.Logger.Info().Msgf("Starting WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
 	// Create HTTP client with session
@@ -169,7 +175,8 @@ func (wb *WebRTCBridge) Stop() {
 	wb.mutex.Lock()
 	defer wb.mutex.Unlock()
 
-	if !wb.connected {
+	hasResources := wb.connected || wb.peerConnection != nil || wb.mqttClient != nil || wb.cameraClient != nil
+	if !hasResources {
 		return
 	}
 
@@ -182,6 +189,9 @@ func (wb *WebRTCBridge) Stop() {
 
 	// Send disconnect
 	if wb.cameraClient != nil {
+		// Prevent stop-triggered disconnect notifications from surfacing as stream errors.
+		wb.cameraClient.HandleError = nil
+		wb.cameraClient.HandleDisconnect = nil
 		wb.cameraClient.SendDisconnect()
 	}
 
@@ -199,6 +209,12 @@ func (wb *WebRTCBridge) Stop() {
 	if wb.rtpForwarder != nil {
 		wb.rtpForwarder.Stop()
 	}
+
+	// Drop references so a future Start builds fresh protocol state.
+	wb.peerConnection = nil
+	wb.dataChannel = nil
+	wb.cameraClient = nil
+	wb.mqttClient = nil
 
 	core.Logger.Info().Msgf("WebRTC bridge stopped for camera: %s", wb.camera.DeviceName)
 }
